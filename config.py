@@ -7,12 +7,15 @@ load_dotenv()
 
 def _get_config(key: str, default: str = None) -> str:
     """优先从 Streamlit Cloud secrets 读取，fallback 到环境变量"""
+    # Streamlit Cloud: st.secrets
     try:
         import streamlit as st
-        if hasattr(st, "secrets") and key in st.secrets:
-            return st.secrets[key]
+        val = st.secrets.get(key)
+        if val:
+            return val
     except Exception:
         pass
+    # Local dev: .env via os.getenv
     return os.getenv(key, default)
 
 
