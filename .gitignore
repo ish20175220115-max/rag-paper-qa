@@ -1,0 +1,32 @@
+# 虚拟环境
+venv/
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 环境变量（包含敏感信息）
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# 临时文件
+*.tmp
+temp/
+
+# 其他无关项目
+ragflow/
+
+# PDF 源文件（向量库 chroma_db_v2 已包含处理后的数据）
+*.pdf
+
+# 学习笔记
+code-tutor-*.md
+
+# Claude 内部文件
+.agents/
+.claude/
+
+# chroma_db_v2 较小，保留以提供预置数据
