@@ -11,20 +11,27 @@ import os
 
 
 # ── 用 RunnableLambda 调用 DashScope（避免 BaseChatModel 兼容问题）──
-def _call_qwen(messages: list) -> AIMessage:
+def _call_qwen(messages) -> AIMessage:
     """将 LangChain 消息列表发给百炼 qwen-max，返回 AIMessage"""
+    # ChatPromptValue → 转为消息列表
+    if hasattr(messages, "to_messages"):
+        messages = messages.to_messages()
+    elif not isinstance(messages, list):
+        messages = list(messages)
+
     payload = []
     for m in messages:
-        t = getattr(m, "type", "")
-        if t == "system":
-            payload.append({"role": "system", "content": m.content})
-        elif t == "ai":
-            payload.append({"role": "assistant", "content": m.content})
-        elif t == "human":
-            payload.append({"role": "user", "content": m.content})
+        if isinstance(m, tuple):
+            role, content = m[0], m[1]
         else:
-            # fallback: treat as user message
-            payload.append({"role": "user", "content": str(m.content)})
+            role = getattr(m, "type", "")
+            content = m.content
+        if role in ("system",):
+            payload.append({"role": "system", "content": content})
+        elif role in ("ai", "assistant"):
+            payload.append({"role": "assistant", "content": content})
+        else:
+            payload.append({"role": "user", "content": str(content)})
 
     resp = dashscope.Generation.call(
         api_key=DASHSCOPE_API_KEY,
