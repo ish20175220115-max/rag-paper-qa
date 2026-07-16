@@ -1,14 +1,60 @@
 import dashscope
-from langchain_dashscope import ChatDashScope
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_core.documents import Document
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.callbacks import CallbackManagerForLLMRun
+from langchain_core.outputs import ChatResult, ChatGeneration
 from knowledge import get_vector_store, get_parent_store, get_grandparent_store
 from config import DASHSCOPE_API_KEY
 import time
 import os
+from typing import Any, List, Optional
+
+
+# ── 自定义 DashScope ChatModel（替代 langchain_dashscope，避免 tiktoken 依赖）──
+class _QwenChat(BaseChatModel):
+    """封装 dashscope.Generation 为 LangChain BaseChatModel"""
+    model: str = "qwen-max"
+    api_key: str = ""
+
+    def _generate(
+        self,
+        messages: List[BaseMessage],
+        stop: Optional[List[str]] = None,
+        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        payload = []
+        for m in messages:
+            if isinstance(m, HumanMessage):
+                payload.append({"role": "user", "content": m.content})
+            elif isinstance(m, AIMessage):
+                payload.append({"role": "assistant", "content": m.content})
+            elif hasattr(m, "type"):
+                if m.type == "system":
+                    payload.append({"role": "system", "content": m.content})
+                else:
+                    payload.append({"role": "user", "content": m.content})
+
+        resp = dashscope.Generation.call(
+            api_key=self.api_key or DASHSCOPE_API_KEY,
+            model=self.model,
+            messages=payload,
+            result_format="message",
+        )
+        if resp.status_code == 200 and resp.output.choices:
+            content = resp.output.choices[0].message.content
+        else:
+            content = f"调用失败: {resp.code} {resp.message}"
+
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(content=content))])
+
+    @property
+    def _llm_type(self) -> str:
+        return "qwen-dashscope"
 
 
 def _format_docs(docs: list, max_chars: int = 100000) -> str:
@@ -18,10 +64,10 @@ def _format_docs(docs: list, max_chars: int = 100000) -> str:
     """
     if not docs:
         return "（无相关信息）"
-    
+
     parts = []
     total_len = 0
-    
+
     for i, doc in enumerate(docs):
         source = doc.metadata.get("source", "未知")
         header = (
@@ -31,16 +77,16 @@ def _format_docs(docs: list, max_chars: int = 100000) -> str:
         )
         header_str = f"[章节: {header}] " if header else ""
         part = f"[{i+1}] {header_str}来源: {source}\n{doc.page_content}"
-        
+
         # 检查加上当前块是否会超限
         if total_len + len(part) > max_chars:
             remaining = len(docs) - i
             parts.append(f"[{i+1}] ...(剩余 {remaining} 个片段因长度限制未显示)")
             break
-        
+
         parts.append(part)
         total_len += len(part)
-    
+
     return "\n\n---\n\n".join(parts)
 
 
@@ -171,7 +217,7 @@ def _web_answer(question: str, chat_history: list) -> str:
 
 def build_chain():
     """构建问答链，输入需包含 question, chat_history, context"""
-    llm = ChatDashScope(model="qwen-max", verbose=False)
+    llm = _QwenChat(model="qwen-max", api_key=DASHSCOPE_API_KEY)
 
     system_prompt = """你是一个学术论文智能问答助手。我会提供若干知识库片段，其中部分可能与问题相关，部分可能无关。
 
