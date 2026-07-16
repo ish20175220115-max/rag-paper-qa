@@ -171,7 +171,7 @@ def _retrieve(question: str):
 
 
 def _web_answer(question: str, chat_history: list) -> str:
-    """知识库无相关内容时，调用百炼联网模型回答"""
+    """知识库无相关内容时，调用百炼联网模型回答；联网失败则降级到普通模型"""
     try:
         messages = [{"role": "system", "content": "你是一个智能助手，请联网搜索后回答用户问题，并注明信息来源。"}]
         for msg in chat_history:
@@ -181,17 +181,27 @@ def _web_answer(question: str, chat_history: list) -> str:
                 messages.append({"role": "assistant", "content": msg.content})
         messages.append({"role": "user", "content": question})
 
+        # 先尝试联网搜索
         response = dashscope.Generation.call(
             api_key=DASHSCOPE_API_KEY,
             model="qwen-plus-latest",
             messages=messages,
             extra_body={"enable_search": True},
         )
-        if response.status_code == 200:
-            choices = getattr(response.output, "choices", None)
-            if choices:
-                return getattr(choices[0].message, "content", "联网搜索未返回有效内容")
-        return f"联网搜索失败: {response.message}"
+        if response.status_code == 200 and response.output and response.output.choices:
+            return response.output.choices[0].message.content
+
+        # 联网失败，降级到普通模型
+        print(f"[联网搜索] 状态码={response.status_code} 错误码={response.code} 错误信息={response.message}")
+        resp2 = dashscope.Generation.call(
+            api_key=DASHSCOPE_API_KEY,
+            model="qwen-max",
+            messages=messages,
+            result_format="message",
+        )
+        if resp2.status_code == 200 and resp2.output and resp2.output.choices:
+            return "(未找到相关论文内容，以下为通用回答)\n\n" + resp2.output.choices[0].message.content
+        return f"模型调用失败: status={resp2.status_code} code={resp2.code} msg={resp2.message}"
     except Exception as e:
         return f"联网搜索出错: {str(e)}"
 
